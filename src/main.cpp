@@ -1,3 +1,5 @@
+#include <Arduino.h>
+
 // FHT, see http://wiki.openmusiclabs.com/wiki/ArduinoFHT
 #define LOG_OUT 1 // use the log output function
 #define FHT_N 128 // amount of bins to use
@@ -91,32 +93,36 @@ float lightIntensityValue = 0;
 
 long lastPulseTimestamp = 0;
 
-void setup() {
-  setupADC();
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(HAT_LIGHTS_PIN, OUTPUT);
-  pinMode(HAT_LIGHTS_LOW_PIN, OUTPUT);
-  pinMode(HAT_LIGHTS_HIGH_PIN, OUTPUT);
-  pinMode(HAT_LIGHTS_PULSE_PIN, OUTPUT);
-  pinMode(SOUND_REFERENCE_PIN, OUTPUT);
-  
-  digitalWrite(HAT_LIGHTS_PIN, HIGH);
-  digitalWrite(SOUND_REFERENCE_PIN, HIGH);
-  
-  analogWrite(HAT_LIGHTS_LOW_PIN, 255 * MINIMUM_LIGHT_INTENSITY);
-  analogWrite(HAT_LIGHTS_HIGH_PIN, 255 * MAXIMUM_LIGHT_INTENSITY);
-
-  for (int i = 0; i < FREQUENCY_MAGNITUDE_SAMPLES; i++) {
-    overallFrequencyMagnitudes[i] = 0;
-    firstFrequencyMagnitudes[i] = 0;
-    secondFrequencyMagnitudes[i] = 0;
-    signals[i] = 0;
+/**
+ * Converts the specified value into an ASCII-art progressbar
+ * with the specified length.
+ */
+String toProgressBar(float value, const int length) {
+  int amount = max(0, min(length, value * length));
+  String progressBar = "[";
+  for (int i = 0; i < amount; i++) {
+    progressBar += "=";
   }
-  
-  Serial.begin(115200);
-  Serial.println("Starting Festival Hat Controller");
+  for (int i = 0; i < length - amount; i++) {
+    progressBar += " ";
+  }
+  progressBar += "]";
+  return progressBar;
 }
+
+void logValue(String name, float value, int length) {
+  Serial.print(" | " + name + ": " + toProgressBar(value, length));
+}
+
+void logValue(String name, float value) {
+  logValue(name, value, 10);
+}
+
+void logValue(String name, boolean value) {
+  logValue(name, value ? 1.0 : 0.0, 1);
+}
+
 
 /**
  * Analog to Digital Conversion needs to be configured to free running mode
@@ -131,25 +137,19 @@ void setupADC() {
   DIDR0 = 0x01; // turn off the digital input for adc0
 }
 
-void loop() {
-  if (LOG_FREQUENCY_DATA) {
-    readAudioSamples();
-    getFrequencyData();
-    logFrequencyData();
-  } else {
-    Serial.print(String(millis()));
-    readAudioSamples();
-    if (PERFORM_BEAT_DETECTION) {
-      getFrequencyData();
-      processFrequencyData();
-      updateBeatProbability();
-      updateLightIntensityBasedOnBeats();
-    } else {
-      updateLightIntensityBasedOnAmplitudes();
-    }
-    updateLights();
-    Serial.println("");
+void processHistoryValues(byte history[], int &historyIndex, int &current, int &total, int &average, int &variance) {
+  total -= history[historyIndex]; // subtract the oldest history value from the total
+  total += (byte) current; // add the current value to the total
+  history[historyIndex] = current; // add the current value to the history
+  
+  average = total / FREQUENCY_MAGNITUDE_SAMPLES;
+  
+  // update the variance of frequency magnitudes
+  long squaredDifferenceSum = 0;
+  for (int i = 0; i < FREQUENCY_MAGNITUDE_SAMPLES; i++) {
+    squaredDifferenceSum += pow(history[i] - average, 2);
   }
+  variance = (double) squaredDifferenceSum / FREQUENCY_MAGNITUDE_SAMPLES;
 }
 
 /**
@@ -226,25 +226,31 @@ void logFrequencyData() {
 #endif
 }
 
-/**
- * Will extract insightful features from the frequency data in order
- * to perform the beat detection.
- */
-void processFrequencyData() {
-  // each of the methods below will:
-  //  - get the current frequency magnitude
-  //  - add the current magnitude to the history
-  //  - update relevant features
-  processOverallFrequencyMagnitude();
-  processFirstFrequencyMagnitude();
-  processSecondFrequencyMagnitude();
+
+byte getFrequencyMagnitude(byte frequencies[], const int startIndex, const int endIndex) {
+  int total = 0;
+  int average = 0;
+  int maximum = 0;
+  int minimum = MAXIMUM_SIGNAL_VALUE;
+  int current;
   
-  // prepare the magnitude sample index for the next update
-  frequencyMagnitudeSampleIndex += 1;
-  if (frequencyMagnitudeSampleIndex >= FREQUENCY_MAGNITUDE_SAMPLES) {
-    frequencyMagnitudeSampleIndex = 0; // wrap the index
+  for (int i = startIndex; i < endIndex; i++) {
+    current = frequencies[i];
+    total += current;
+    maximum = max(maximum, current);
+    minimum = min(minimum, current);
   }
+  
+  average = total / (endIndex - startIndex);
+  
+  int value = average;
+  //int value = maximum - average;
+  
+  //logValue("F", (float) value / 128, 10);
+  
+  return value;
 }
+
 
 void processOverallFrequencyMagnitude() {
   currentOverallFrequencyMagnitude = getFrequencyMagnitude(
@@ -295,64 +301,6 @@ void processSecondFrequencyMagnitude() {
     averageSecondFrequencyMagnitude, 
     secondFrequencyMagnitudeVariance
   );
-}
-
-byte getFrequencyMagnitude(byte frequencies[], const int startIndex, const int endIndex) {
-  int total = 0;
-  int average = 0;
-  int maximum = 0;
-  int minimum = MAXIMUM_SIGNAL_VALUE;
-  int current;
-  
-  for (int i = startIndex; i < endIndex; i++) {
-    current = frequencies[i];
-    total += current;
-    maximum = max(maximum, current);
-    minimum = min(minimum, current);
-  }
-  
-  average = total / (endIndex - startIndex);
-  
-  int value = average;
-  //int value = maximum - average;
-  
-  //logValue("F", (float) value / 128, 10);
-  
-  return value;
-}
-
-void processHistoryValues(byte history[], int &historyIndex, int &current, int &total, int &average, int &variance) {
-  total -= history[historyIndex]; // subtract the oldest history value from the total
-  total += (byte) current; // add the current value to the total
-  history[historyIndex] = current; // add the current value to the history
-  
-  average = total / FREQUENCY_MAGNITUDE_SAMPLES;
-  
-  // update the variance of frequency magnitudes
-  long squaredDifferenceSum = 0;
-  for (int i = 0; i < FREQUENCY_MAGNITUDE_SAMPLES; i++) {
-    squaredDifferenceSum += pow(history[i] - average, 2);
-  }
-  variance = (double) squaredDifferenceSum / FREQUENCY_MAGNITUDE_SAMPLES;
-}
-
-/**
- * Will update the beat probability, a value between 0 and 1
- * indicating how likely it is that there's a beat right now.
- */
-void updateBeatProbability() {
-  beatProbability = 1;
-  beatProbability *= calculateSignalChangeFactor();
-  beatProbability *= calculateMagnitudeChangeFactor();
-  beatProbability *= calculateVarianceFactor();
-  beatProbability *= calculateRecencyFactor();
-  
-  if (beatProbability >= beatProbabilityThreshold) {
-    lastBeatTimestamp = millis();
-    durationSinceLastBeat = 0;
-  }
-  
-  logValue("B", beatProbability, 5);
 }
 
 /**
@@ -484,6 +432,46 @@ float calculateRecencyFactor() {
   return recencyFactor;
 }
 
+
+/**
+ * Will update the beat probability, a value between 0 and 1
+ * indicating how likely it is that there's a beat right now.
+ */
+void updateBeatProbability() {
+  beatProbability = 1;
+  beatProbability *= calculateSignalChangeFactor();
+  beatProbability *= calculateMagnitudeChangeFactor();
+  beatProbability *= calculateVarianceFactor();
+  beatProbability *= calculateRecencyFactor();
+  
+  if (beatProbability >= beatProbabilityThreshold) {
+    lastBeatTimestamp = millis();
+    durationSinceLastBeat = 0;
+  }
+  
+  logValue("B", beatProbability, 5);
+}
+
+/**
+ * Will extract insightful features from the frequency data in order
+ * to perform the beat detection.
+ */
+void processFrequencyData() {
+  // each of the methods below will:
+  //  - get the current frequency magnitude
+  //  - add the current magnitude to the history
+  //  - update relevant features
+  processOverallFrequencyMagnitude();
+  processFirstFrequencyMagnitude();
+  processSecondFrequencyMagnitude();
+  
+  // prepare the magnitude sample index for the next update
+  frequencyMagnitudeSampleIndex += 1;
+  if (frequencyMagnitudeSampleIndex >= FREQUENCY_MAGNITUDE_SAMPLES) {
+    frequencyMagnitudeSampleIndex = 0; // wrap the index
+  }
+}
+
 /**
  * Will update the light intensity bump based on the recency of detected beats.
  */
@@ -573,31 +561,52 @@ void updateLights() {
   }
 }
 
-/**
- * Converts the specified value into an ASCII-art progressbar
- * with the specified length.
- */
-String toProgressBar(float value, const int length) {
-  int amount = max(0, min(length, value * length));
-  String progressBar = "[";
-  for (int i = 0; i < amount; i++) {
-    progressBar += "=";
+
+void setup() {
+  setupADC();
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(HAT_LIGHTS_PIN, OUTPUT);
+  pinMode(HAT_LIGHTS_LOW_PIN, OUTPUT);
+  pinMode(HAT_LIGHTS_HIGH_PIN, OUTPUT);
+  pinMode(HAT_LIGHTS_PULSE_PIN, OUTPUT);
+  pinMode(SOUND_REFERENCE_PIN, OUTPUT);
+  
+  digitalWrite(HAT_LIGHTS_PIN, HIGH);
+  digitalWrite(SOUND_REFERENCE_PIN, HIGH);
+  
+  analogWrite(HAT_LIGHTS_LOW_PIN, 255 * MINIMUM_LIGHT_INTENSITY);
+  analogWrite(HAT_LIGHTS_HIGH_PIN, 255 * MAXIMUM_LIGHT_INTENSITY);
+
+  for (int i = 0; i < FREQUENCY_MAGNITUDE_SAMPLES; i++) {
+    overallFrequencyMagnitudes[i] = 0;
+    firstFrequencyMagnitudes[i] = 0;
+    secondFrequencyMagnitudes[i] = 0;
+    signals[i] = 0;
   }
-  for (int i = 0; i < length - amount; i++) {
-    progressBar += " ";
+  
+  Serial.begin(115200);
+  Serial.println("Starting Festival Hat Controller");
+}
+
+
+void loop() {
+  if (LOG_FREQUENCY_DATA) {
+    readAudioSamples();
+    getFrequencyData();
+    logFrequencyData();
+  } else {
+    Serial.print(String(millis()));
+    readAudioSamples();
+    if (PERFORM_BEAT_DETECTION) {
+      getFrequencyData();
+      processFrequencyData();
+      updateBeatProbability();
+      updateLightIntensityBasedOnBeats();
+    } else {
+      updateLightIntensityBasedOnAmplitudes();
+    }
+    updateLights();
+    Serial.println("");
   }
-  progressBar += "]";
-  return progressBar;
-}
-
-void logValue(String name, boolean value) {
-  logValue(name, value ? 1.0 : 0.0, 1);
-}
-
-void logValue(String name, float value) {
-  logValue(name, value, 10);
-}
-
-void logValue(String name, float value, int length) {
-  Serial.print(" | " + name + ": " + toProgressBar(value, length));
 }
