@@ -1,4 +1,7 @@
 #include <Arduino.h>
+#include <Adafruit_GFX.h>
+#include <FastLED.h>
+#include <FastLED_NeoMatrix.h>
 
 // FHT, see http://wiki.openmusiclabs.com/wiki/ArduinoFHT
 #define LOG_OUT 1 // use the log output function
@@ -7,7 +10,7 @@
 
 #define FreqLog // use log scale for FHT frequencies
 #define FreqGainFactorBits 0
-#define FreqSerialBinary
+//#define FreqSerialBinary
 #define VolumeGainFactorBits 0
 
 // Macros for faster sampling, see
@@ -21,7 +24,7 @@ const bool LOG_FREQUENCY_DATA = false;
 
 // Set to true if the light should be based on detected beats instead
 // of detected amplitudes.
-const bool PERFORM_BEAT_DETECTION = false;
+const bool PERFORM_BEAT_DETECTION = true;
 
 const int SOUND_REFERENCE_PIN = 8; // D8
 const int HAT_LIGHTS_PIN = 9; // D9
@@ -29,12 +32,22 @@ const int HAT_LIGHTS_LOW_PIN = 11; // D11
 const int HAT_LIGHTS_HIGH_PIN = 12; // D12
 const int HAT_LIGHTS_PULSE_PIN = 13; // D13
 
+// Matrix LED IO
+constexpr int MATRIX_PIN = 7;
+constexpr int MATRIX_W = 8;
+constexpr int MATRIX_H = 8;
+constexpr int NUMMATRIX = MATRIX_W * MATRIX_H;
+
+CRGB matrixleds[NUMMATRIX];
+FastLED_NeoMatrix matrix(matrixleds, MATRIX_W, MATRIX_H, NEO_MATRIX_TOP + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS );
+
+
 const int LIGHT_PULSE_DELAY = 10000;
 const int LIGHT_PULSE_DURATION = 2000;
 
 const int LIGHT_FADE_OUT_DURATION = 500; // good value range is [100:1000]
 const float MINIMUM_LIGHT_INTENSITY = 0.01; // in range [0:1]
-const float MAXIMUM_LIGHT_INTENSITY = 0.2; // in range [0:1]
+const float MAXIMUM_LIGHT_INTENSITY = 1.0; // in range [0:1]
 
 const int MAXIMUM_SIGNAL_VALUE = 1024;
 
@@ -577,6 +590,10 @@ void setup() {
   
   analogWrite(HAT_LIGHTS_LOW_PIN, 255 * MINIMUM_LIGHT_INTENSITY);
   analogWrite(HAT_LIGHTS_HIGH_PIN, 255 * MAXIMUM_LIGHT_INTENSITY);
+
+  FastLED.addLeds<WS2812B,MATRIX_PIN,RGB>(matrixleds, NUMMATRIX); 
+  matrix.begin();
+  matrix.setBrightness(5);
 
   for (int i = 0; i < FREQUENCY_MAGNITUDE_SAMPLES; i++) {
     overallFrequencyMagnitudes[i] = 0;
