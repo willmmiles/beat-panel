@@ -112,7 +112,7 @@ String toProgressBar(float value, const int length) {
 }
 
 void logValue(String name, float value, int length) {
-  Serial.print(" | " + name + ": " + toProgressBar(value, length));
+  Serial.println(" | " + name + ": " + value + " " + toProgressBar(value, length));
 }
 
 void logValue(String name, float value) {
@@ -194,9 +194,9 @@ void readAudioSamples() {
     signalVariance
   );
   
-  //logValue("A", (float) currentAverage / MAXIMUM_SIGNAL_VALUE, 10);
-  //logValue("M", (float) currentMaximum / MAXIMUM_SIGNAL_VALUE, 10);
   logValue("S", (float) currentSignal / MAXIMUM_SIGNAL_VALUE, 20);
+  logValue("A", (float) currentAverage / MAXIMUM_SIGNAL_VALUE, 10);
+  logValue("M", (float) currentMaximum / MAXIMUM_SIGNAL_VALUE, 10);  
 }
 
 /**
@@ -223,6 +223,7 @@ void logFrequencyData() {
       Serial.print(fht_log_out[i]);
       Serial.print(',');
   }
+  Serial.print("\n");
 #endif
 }
 
@@ -246,7 +247,7 @@ byte getFrequencyMagnitude(byte frequencies[], const int startIndex, const int e
   int value = average;
   //int value = maximum - average;
   
-  //logValue("F", (float) value / 128, 10);
+  logValue("F", (float) value / 128, 10);
   
   return value;
 }
@@ -317,8 +318,8 @@ float calculateSignalChangeFactor() {
     aboveAverageSignalFactor = constrain(aboveAverageSignalFactor, 0, 2);
   }
   
-  //logValue("SC", (float) currentSignal / 512, 10);
-  //logValue("SA", (float) averageSignal / 512, 10);
+  logValue("SC", (float) currentSignal / 512, 10);
+  logValue("SA", (float) averageSignal / 512, 10);
   logValue("SF", aboveAverageSignalFactor / 2, 2);
   return aboveAverageSignalFactor;
 }
@@ -551,8 +552,7 @@ void updateLights() {
   // scale the intensity to be in range of maximum and minimum
   scaledLightIntensity = MINIMUM_LIGHT_INTENSITY + (fadeFactor * (MAXIMUM_LIGHT_INTENSITY - MINIMUM_LIGHT_INTENSITY));
   
-  //logValue("P", scaledLightIntensity, 10);
-  
+  logValue("P", scaledLightIntensity, 10);
   pinValue = 255 * scaledLightIntensity;
   analogWrite(HAT_LIGHTS_PULSE_PIN, pinValue);
   
