@@ -1,8 +1,5 @@
 #include <limits.h>
 #include <Arduino.h>
-#include <Adafruit_GFX.h>
-#include <FastLED.h>
-#include <FastLED_NeoMatrix.h>
 
 // FHT, see http://wiki.openmusiclabs.com/wiki/ArduinoFHT
 #define LOG_OUT 1 // use the log output function
@@ -10,7 +7,7 @@
 #include <FHT.h> // include the library
 
 #define FreqLog // use log scale for FHT frequencies
-#define FreqGainFactorBits 6  // use 6 for justification
+#define FreqGainFactorBits 0 // 6  // use 6 for justification
 //#define FreqSerialBinary
 
 // Macros for faster sampling, see
@@ -24,7 +21,7 @@ const bool LOG_FREQUENCY_DATA = false;
 
 // Set to true if the light should be based on detected beats instead
 // of detected amplitudes.
-const bool PERFORM_BEAT_DETECTION = true;
+const bool PERFORM_BEAT_DETECTION = false;
 
 const int SOUND_REFERENCE_PIN = 8; // D8
 const int HAT_LIGHTS_PIN = 9; // D9
@@ -32,21 +29,11 @@ const int HAT_LIGHTS_LOW_PIN = 11; // D11
 const int HAT_LIGHTS_HIGH_PIN = 12; // D12
 const int HAT_LIGHTS_PULSE_PIN = 13; // D13
 
-// Matrix LED IO
-constexpr int MATRIX_PIN = 7;
-constexpr int MATRIX_W = 8;
-constexpr int MATRIX_H = 8;
-constexpr int NUMMATRIX = MATRIX_W * MATRIX_H;
-
-CRGB matrixleds[NUMMATRIX];
-FastLED_NeoMatrix matrix(matrixleds, MATRIX_W, MATRIX_H, NEO_MATRIX_TOP + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS );
-
-
 const int LIGHT_PULSE_DELAY = 2000;
 const int LIGHT_PULSE_DURATION = 500;
 
 const int LIGHT_FADE_OUT_DURATION = 500; // good value range is [100:1000]
-const float MINIMUM_LIGHT_INTENSITY = 0.01; // in range [0:1]
+const float MINIMUM_LIGHT_INTENSITY = 0; //0.01; // in range [0:1]
 const float MAXIMUM_LIGHT_INTENSITY = 1.0; // in range [0:1]
 
 const int MAXIMUM_SIGNAL_VALUE = 1024;
@@ -68,9 +55,7 @@ const int MAXIMUM_BEATS_PER_MINUTE = 200;
 const int MINIMUM_DELAY_BETWEEN_BEATS = 60000L / MAXIMUM_BEATS_PER_MINUTE;
 const int SINGLE_BEAT_DURATION = 100; // good value range is [50:150]
 
-const int FREQUENCY_MAGNITUDE_SAMPLES = 10; // good value range is [5:15]
-
-int frequencyMagnitudeSampleIndex = 0;
+const int FREQUENCY_MAGNITUDE_SAMPLES = 5; // good value range is [5:15]
 
 struct runningStats {
   int current;
@@ -95,7 +80,6 @@ long lightIntensityBumpTimestamp = 0;
 float lightIntensityBumpValue = 0;
 float lightIntensityValue = 0;
 
-
 /**
  * Converts the specified value into an ASCII-art progressbar
  * with the specified length.
@@ -114,7 +98,6 @@ String toProgressBar(float value, const int length) {
 }
 
 void logValue(String name, float value, int length) {
-  return;
   Serial.print(" | " + name + ": " + value + " " + toProgressBar(value, length));
 }
 
@@ -127,16 +110,6 @@ void logValue(String name, boolean value) {
 }
 
 
-void showMatrixRow(unsigned row, float value, float max) {
-    float amount = (value * MATRIX_W); // / max;
-    int filled = amount; // truncate
-    //matrix.drawFastHLine(0, row, MATRIX_W, FastLED_NeoMatrix::Color(0, 0, 0));
-    matrix.drawFastHLine(0, row, filled, FastLED_NeoMatrix::Color(0, 0, 255));
-    matrix.drawPixel(filled, row, FastLED_NeoMatrix::Color(0, 0, 255 * (amount - filled)));
-    matrix.drawFastHLine(filled+1, row, MATRIX_W - filled - 1, FastLED_NeoMatrix::Color(0, 0, 0));
-};
-
-
 /**
  * Analog to Digital Conversion needs to be configured to free running mode
  * in order to read the sound sensor values at a high frequency.
@@ -146,17 +119,15 @@ void showMatrixRow(unsigned row, float value, float max) {
 void setupADC() {
   ADCSRA = 0xe0+7; // "ADC Enable", "ADC Start Conversion", "ADC Auto Trigger Enable" and divider.
   ADMUX = 0x0; // use adc0. Use ARef pin for analog reference (same as analogReference(EXTERNAL)).
-  ADMUX |= 0x40; // Use Vcc for analog reference.
+  //ADMUX |= 0x40; // Use Vcc for analog reference.
   DIDR0 = 0x01; // turn off the digital input for adc0
 }
 
-void runningStats::update(int value) {
-  current = value;
+void runningStats::update(int value) {  
   total -= history[historyIndex]; // subtract the oldest history value from the total
-  total += value; // add the current value to the total
-  history[historyIndex] = value; // add the current value to the history
-  ++historyIndex;
-  if (historyIndex >= FREQUENCY_MAGNITUDE_SAMPLES) historyIndex = 0;
+  total += current; // add the current value to the total
+  history[historyIndex] = current; // add the current value to the history
+  if (++historyIndex >= FREQUENCY_MAGNITUDE_SAMPLES) historyIndex = 0;
   
   average = total / FREQUENCY_MAGNITUDE_SAMPLES;
   
@@ -167,6 +138,10 @@ void runningStats::update(int value) {
     squaredDifferenceSum += (diff * diff);
   }
   variance = squaredDifferenceSum / FREQUENCY_MAGNITUDE_SAMPLES;
+
+  // Finally, save the new value
+  // Statistics do not include it, so variance analysis is based on prior samples
+  current = value;
 }
 
 
@@ -238,16 +213,12 @@ void readAudioSamples() {
 
   // vPP
   signal.update(currentMaximum - currentMinimum);
+  Serial.print(signal.current);
 
    
-  logValue("S", (float) signal.current / MAXIMUM_SIGNAL_VALUE, 20);
+  logValue("S", (float) signal.current / MAXIMUM_SIGNAL_VALUE, 10);
   //logValue("A", (float) signal.average / MAXIMUM_SIGNAL_VALUE, 10);
   //logValue("M", (float) currentMaximum / MAXIMUM_SIGNAL_VALUE, 10);  
-
-  showMatrixRow(6, (float) signal.current / MAXIMUM_SIGNAL_VALUE, 20);
-  //showMatrixRow(7, (float) (signal.current - signal.average) / MAXIMUM_SIGNAL_VALUE, 20);
-  //showMatrixRow(6, (float) currentAverage / MAXIMUM_SIGNAL_VALUE, 10);
-  //showMatrixRow(7, (float) currentMaximum / MAXIMUM_SIGNAL_VALUE, 10);  
 }
 
 /**
@@ -309,14 +280,13 @@ float calculateSignalChangeFactor() {
   if (sq_diff < (2*signal.variance)) {
     aboveAverageSignalFactor = 0;
   } else */{
-    aboveAverageSignalFactor = ((float) (signal.current - signal.average) / signal.average);
+    aboveAverageSignalFactor = ((float) (signal.current - signal.average) / sqrt32(signal.variance));
     aboveAverageSignalFactor = constrain(aboveAverageSignalFactor, 0, 2);
   }
   
   //logValue("SC", (float) signal.current / 512, 10);
   //logValue("SA", (float) signal.average / 512, 10);  
   logValue("SF", aboveAverageSignalFactor / 2, 2);
-  showMatrixRow(3, aboveAverageSignalFactor / 2, 2);
   return aboveAverageSignalFactor;
 }
 
@@ -379,7 +349,6 @@ float calculateMagnitudeChangeFactor() {
 
   
   logValue("M", magnitudeChangeFactor, 1);
-  showMatrixRow(4, magnitudeChangeFactor, 2);
   
   return magnitudeChangeFactor;
 }
@@ -401,7 +370,6 @@ float calculateVarianceFactor() {
   float varianceFactor = max(firstVarianceFactor, secondVarianceFactor);
   
   logValue("V", varianceFactor, 1);
-  showMatrixRow(5, varianceFactor, 1);
   
   return varianceFactor;
 }
@@ -441,7 +409,6 @@ void updateBeatProbability() {
   }
   
   logValue("B", beatProbability, 5);
-  showMatrixRow(6, beatProbability, 5);
 }
 
 /**
@@ -456,12 +423,6 @@ void processFrequencyData() {
   overallFrequency.update(getFrequencyMagnitude(fht_log_out, OVERALL_FREQUENCY_RANGE_START, OVERALL_FREQUENCY_RANGE_END));
   firstFrequency.update(getFrequencyMagnitude(fht_log_out, FIRST_FREQUENCY_RANGE_START, FIRST_FREQUENCY_RANGE_END));
   secondFrequency.update(getFrequencyMagnitude(fht_log_out, SECOND_FREQUENCY_RANGE_START, SECOND_FREQUENCY_RANGE_END));
-  
-  // prepare the magnitude sample index for the next update
-  frequencyMagnitudeSampleIndex += 1;
-  if (frequencyMagnitudeSampleIndex >= FREQUENCY_MAGNITUDE_SAMPLES) {
-    frequencyMagnitudeSampleIndex = 0; // wrap the index
-  }
 }
 
 /**
@@ -485,7 +446,7 @@ void updateLightIntensityBasedOnAmplitudes() {
   if (signal.average < 1 || signal.current < 1) {
     intensity = 0;
   } else {
-    intensity = (float) (signal.current - signal.average) / INTENSITY_FACTOR;
+    intensity = (float) (signal.current - signal.average) / (10*sqrt32(signal.variance));
     intensity *= pow(intensity, 3);
     
     if (intensity < 0.1) {
@@ -498,7 +459,6 @@ void updateLightIntensityBasedOnAmplitudes() {
   }
   
   logValue("I", intensity, 10);
-  showMatrixRow(3, intensity, 10);
   
   if (intensity > lightIntensityValue) {
     lightIntensityBumpValue = intensity;
@@ -531,9 +491,6 @@ void updateLights() {
   } else {
     digitalWrite(LED_BUILTIN, LOW);
   }
-
-  showMatrixRow(0, lightIntensityValue, 20);
-  showMatrixRow(1, scaledLightIntensity, 10);
 }
 
 void updatePulse() {  
@@ -558,8 +515,6 @@ void updatePulse() {
   if (durationSincePulse >= LIGHT_PULSE_DELAY) {
     lastPulseTimestamp = millis();
   }
-  
-  showMatrixRow(2, scaledLightIntensity, 10);
 }
 
 
@@ -579,11 +534,6 @@ void setup() {
   analogWrite(HAT_LIGHTS_LOW_PIN, 255 * MINIMUM_LIGHT_INTENSITY);
   analogWrite(HAT_LIGHTS_HIGH_PIN, 255 * MAXIMUM_LIGHT_INTENSITY);
 
-  FastLED.addLeds<WS2812B,MATRIX_PIN,RGB>(matrixleds, NUMMATRIX); 
-  matrix.begin();
-  matrix.setBrightness(5);
-  matrix.fillScreen(0);
-
   Serial.begin(115200);
   Serial.println("Starting Festival Hat Controller");
 }
@@ -595,7 +545,6 @@ void loop() {
     getFrequencyData();
     logFrequencyData();
   } else {
-    Serial.print(String(millis()));
     readAudioSamples();
     if (PERFORM_BEAT_DETECTION) {
       getFrequencyData();
@@ -606,7 +555,6 @@ void loop() {
       updateLightIntensityBasedOnAmplitudes();
     }
     updateLights();
-    matrix.show();  
     Serial.println("");
   }
 }
