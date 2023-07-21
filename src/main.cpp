@@ -32,8 +32,8 @@ const int HAT_LIGHTS_PULSE_PIN = 13; // D13
 const int LIGHT_PULSE_DELAY = 2000;
 const int LIGHT_PULSE_DURATION = 500;
 
-const int LIGHT_FADE_OUT_DURATION = 500; // good value range is [100:1000]
-const float MINIMUM_LIGHT_INTENSITY = 0; //0.01; // in range [0:1]
+const int LIGHT_FADE_OUT_DURATION = 200; // good value range is [100:1000]
+const float MINIMUM_LIGHT_INTENSITY = 0.01; // in range [0:1]
 const float MAXIMUM_LIGHT_INTENSITY = 1.0; // in range [0:1]
 
 const int MAXIMUM_SIGNAL_VALUE = 1024;
@@ -51,11 +51,11 @@ const int SECOND_FREQUENCY_RANGE_START = 2;
 const int SECOND_FREQUENCY_RANGE_END = 6;
 const int SECOND_FREQUENCY_RANGE = SECOND_FREQUENCY_RANGE_END - SECOND_FREQUENCY_RANGE_START;
 
-const int MAXIMUM_BEATS_PER_MINUTE = 200;
+const int MAXIMUM_BEATS_PER_MINUTE = 300;
 const int MINIMUM_DELAY_BETWEEN_BEATS = 60000L / MAXIMUM_BEATS_PER_MINUTE;
-const int SINGLE_BEAT_DURATION = 100; // good value range is [50:150]
+const int SINGLE_BEAT_DURATION = 50; // good value range is [50:150]
 
-const int FREQUENCY_MAGNITUDE_SAMPLES = 5; // good value range is [5:15]
+const int FREQUENCY_MAGNITUDE_SAMPLES = 7; // good value range is [5:15]
 
 struct runningStats {
   int current;
@@ -280,7 +280,7 @@ float calculateSignalChangeFactor() {
   if (sq_diff < (2*signal.variance)) {
     aboveAverageSignalFactor = 0;
   } else */{
-    aboveAverageSignalFactor = ((float) (signal.current - signal.average) / sqrt32(signal.variance));
+    aboveAverageSignalFactor = ((float) (signal.current - signal.average) / (2*sqrt32(signal.variance)));
     aboveAverageSignalFactor = constrain(aboveAverageSignalFactor, 0, 2);
   }
   
@@ -399,8 +399,8 @@ float calculateRecencyFactor() {
 void updateBeatProbability() {
   beatProbability = 1;
   beatProbability *= calculateSignalChangeFactor();
-  beatProbability *= calculateMagnitudeChangeFactor();
-  beatProbability *= calculateVarianceFactor();
+  //beatProbability *= calculateMagnitudeChangeFactor();
+  beatProbability *= max(calculateMagnitudeChangeFactor(), calculateVarianceFactor());
   beatProbability *= calculateRecencyFactor();
   
   if (beatProbability >= beatProbabilityThreshold) {
